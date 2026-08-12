@@ -111,12 +111,14 @@ async function main(): Promise<void> {
   let plannedEvents = 0;
 
   for (const file of files) {
+    const { project, cwd } = decodeProjectSlug(file.projectSlug);
+
     if (existing.has(file.sessionId)) {
       skippedExists += 1;
+      console.log(`skipped(exists) ${file.sessionId} project=${project}`);
       continue;
     }
 
-    const { project, cwd } = decodeProjectSlug(file.projectSlug);
     const events = await parseTranscriptFile(file.path, file.sessionId);
     if (events.length === 0) continue;
 
@@ -124,6 +126,9 @@ async function main(): Promise<void> {
       const first = Date.parse(events[0].timestamp);
       if (!Number.isNaN(first) && first >= cutoff) {
         skippedBefore += 1;
+        console.log(
+          `skipped(before) ${file.sessionId} project=${project} first=${events[0].timestamp}`,
+        );
         continue;
       }
     }
