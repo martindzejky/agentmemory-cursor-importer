@@ -4,7 +4,8 @@ Small local CLI. Reads Cursor agent transcript JSONL from disk and posts user pr
 
 One HTTP request per session (chunked at 500 events if needed).
 
-Also exports Cursor Cloud agent conversations via the Cloud Agents HTTP API into `tmp/cloud-agents/<id>.json` (Phase 1). Importing those files into agentmemory is not wired yet.
+Also exports Cursor Cloud agent conversations via the Cloud Agents HTTP API into
+`tmp/cloud-agents/<id>.json`, then imports those envelopes into agentmemory.
 
 Needs agentmemory with the bulk observe endpoint (fork PR #19).
 
@@ -96,22 +97,38 @@ Skips deleted agents and empty conversations. Envelope shape:
 
 Needs `CURSOR_API_KEY` in `.env`. Does not call agentmemory.
 
+### Cloud import
+
+Reads `tmp/cloud-agents/*.json` (override with `--path DIR`) and posts to
+`/agentmemory/observe/bulk` using the same path as local import.
+
+```bash
+# dry-run first
+pnpm build && node dist/cli.js import-cloud --limit 5
+
+# apply (turn OFF AGENTMEMORY_AUTO_COMPRESS on Railway first)
+node dist/cli.js import-cloud --apply
+```
+
+- `sessionId` = cloud agent id (`bc-…`)
+- `eventId` = `cursor-cloud:{sessionId}:{messageId}`
+- Timestamps: evenly spaced from envelope `createdAt` → `updatedAt` (or +1ms if equal)
+- `project` / `cwd` from the first repo URL in the envelope
+- Skips sessions already present on the server (including ones captured live by hooks)
+
 ## Safety
 
-- Local import is dry-run unless you pass `--apply`.
+- Imports are dry-run unless you pass `--apply`.
+- Before `import-cloud --apply`, turn **off** `AGENTMEMORY_AUTO_COMPRESS` on Railway.
+  Re-enable after the run finishes.
 - Session-exists skip uses `GET /agentmemory/replay/sessions`. Progress lines print
   `[ 12%] skipped(exists)|skipped(before)|import|dry-run ...` as each file is handled.
 - Ctrl+C once finishes the current session/agent, then stops. Ctrl+C again aborts immediately
   and prints the partial session id when importing (forget that session if you need a clean re-import).
   The summary always prints, including files remaining. This needs `node dist/cli.js`:
   under `pnpm` one Ctrl+C arrives as two SIGINTs and aborts on the spot.
-- Stable per-message `eventId`s so retries dedupe on the server. One id per imported
-  prompt or assistant reply in that session, in file order. Examples for session
-  `abc-123`:
-  - `cursor-local:abc-123:u:0` (first user prompt)
-  - `cursor-local:abc-123:a:1` (first assistant reply)
-  - `cursor-local:abc-123:u:2` (second user prompt)
-  - `cursor-local:abc-123:a:3` (second assistant reply)
-    Re-running the same file with the same parser yields the same ids.
+- Stable per-message `eventId`s so retries dedupe on the server.
+  - Local session `abc-123`: `cursor-local:abc-123:u:0`, `cursor-local:abc-123:a:1`, …
+  - Cloud session `bc-…`: `cursor-cloud:bc-…:{messageId}`
 
 Do one real import only after you are happy with a dry-run summary.
