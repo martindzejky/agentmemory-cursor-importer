@@ -1,0 +1,26 @@
+{
+  "name": "agentmemory-cursor-importer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Import local Cursor agent transcripts into agentmemory via /observe",
+  "bin": {
+    "agentmemory-cursor-importer": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "dev": "pnpm build && node dist/cli.js",
+    "start": "node dist/cli.js",
+    "fix": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@11.7.0+sha512.19cc852c120c7125760f2443ee6be0ca5b40f9f50598de1a09a1f177503e010e57c23c77646e01e761de59bf874fb22a3398c33ab9691fc13eb946b6f0f4d620",
+  "engines": {
+    "node": ">=24"
+  }
+}

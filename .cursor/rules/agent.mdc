@@ -1,0 +1,20 @@
+---
+description: Agent context and workflow
+alwaysApply: true
+---
+
+# Agent instructions
+
+**Read `README.md` first.**
+If docs and code disagree, trust code and update docs in the same change.
+If anything is unclear or instructions conflict, STOP and ask.
+
+## Code and verification
+
+After you finish, run `pnpm check` (and `pnpm build` when relevant).
+Write simple, minimal code.
+Prefer existing patterns.
+Do not add unrequested features or APIs.
+Store temporary artifacts in `tmp/`, not the repo root.
+
+This is a local CLI. Do not call a hosted agentmemory with `--apply` unless the user explicitly asks.
