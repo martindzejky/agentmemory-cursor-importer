@@ -58,17 +58,22 @@ Only sessions whose first event is before a date:
 pnpm start --before 2026-08-09T00:00:00.000Z
 ```
 
-Actually write (review the dry-run first):
+Actually write (review the dry-run first). Run the built file directly, not through
+`pnpm`, so Ctrl+C works as described below:
 
 ```bash
-pnpm start --apply
+pnpm build && node dist/cli.js --apply
 ```
 
 ## Safety
 
 - Dry-run unless you pass `--apply`.
 - Session-exists skip uses `GET /agentmemory/replay/sessions`. Progress lines print
-  `skipped(exists)` / `skipped(before)` / `import` as each file is handled.
+  `[ 12%] skipped(exists)|skipped(before)|import|dry-run ...` as each file is handled.
+- Ctrl+C once finishes the current session, then stops. Ctrl+C again aborts immediately
+  and prints the partial session id (forget that session if you need a clean re-import).
+  The summary always prints, including files remaining. This needs `node dist/cli.js`:
+  under `pnpm` one Ctrl+C arrives as two SIGINTs and aborts on the spot.
 - Stable per-message `eventId`s so retries dedupe on the server. One id per imported
   prompt or assistant reply in that session, in file order. Examples for session
   `abc-123`:

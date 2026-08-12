@@ -37,6 +37,7 @@ export async function listSessionIds(client: AgentmemoryClient): Promise<Set<str
 export async function postObserveBulk(
   client: AgentmemoryClient,
   observations: Record<string, unknown>[],
+  signal?: AbortSignal,
 ): Promise<BulkObserveResult> {
   const res = await fetch(`${client.baseUrl}/agentmemory/observe/bulk`, {
     method: "POST",
@@ -46,6 +47,7 @@ export async function postObserveBulk(
       Accept: "application/json",
     },
     body: JSON.stringify({ observations }),
+    signal,
   });
 
   let data: unknown = null;
