@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   chunkObservations,
   listSessionIds,
@@ -9,14 +9,20 @@ import {
   type AgentmemoryClient,
 } from "./client.js";
 import { loadDotEnv, requireEnv } from "./env.js";
+import { exportCloudAgents } from "./export-cloud.js";
 import { parseTranscriptFile, type ImportEvent } from "./parse.js";
 import { decodeProjectSlug } from "./project.js";
 import { findParentTranscripts, type TranscriptFile } from "./walk.js";
 
-type Options = {
+type ImportOptions = {
   apply: boolean;
   path: string;
   before: string | null;
+  limit: number | null;
+};
+
+type ExportCloudOptions = {
+  outDir: string;
   limit: number | null;
 };
 
@@ -28,30 +34,36 @@ type RunState = {
 };
 
 function printHelp(): void {
-  console.log(`Import local Cursor agent transcripts into agentmemory.
+  console.log(`Import local Cursor agent transcripts into agentmemory, or export
+cloud agent conversations to disk.
 
 Usage:
   node dist/cli.js [--apply] [--path DIR] [--before ISO] [--limit N]
+  node dist/cli.js export-cloud [--out DIR] [--limit N]
 
-Defaults to dry-run (no writes). Pass --apply to POST /agentmemory/observe/bulk
-(one request per session, chunked at ${OBSERVE_BULK_MAX} events).
+Local import defaults to dry-run (no writes). Pass --apply to POST
+/agentmemory/observe/bulk (one request per session, chunked at ${OBSERVE_BULK_MAX}).
 
-Ctrl+C once: finish the current session, then stop.
+export-cloud lists agents via GET /v1/agents and writes readable conversations
+from GET /v0/agents/{id}/conversation to tmp/cloud-agents/<id>.json
+(skips deleted/empty). Does not touch agentmemory.
+
+Ctrl+C once: finish the current session/agent, then stop.
 Ctrl+C twice: abort immediately (may leave a partial session).
 
 Env:
-  AGENTMEMORY_URL
-  AGENTMEMORY_SECRET
+  AGENTMEMORY_URL / AGENTMEMORY_SECRET  (local import)
+  CURSOR_API_KEY                        (export-cloud)
 
-Timestamps:
+Local timestamps:
   Start from file birthtime (else mtime).
   A user <timestamp> tag sets the clock.
   Anything without a tag advances +1ms.
 `);
 }
 
-function parseArgs(argv: string[]): Options {
-  const opts: Options = {
+function parseImportArgs(argv: string[]): ImportOptions {
+  const opts: ImportOptions = {
     apply: false,
     path: join(homedir(), ".cursor", "projects"),
     before: null,
@@ -77,6 +89,37 @@ function parseArgs(argv: string[]): Options {
     if (arg === "--before") {
       opts.before = argv[++i] ?? "";
       if (!opts.before) throw new Error("--before needs an ISO date");
+      continue;
+    }
+    if (arg === "--limit") {
+      const raw = argv[++i];
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n <= 0) throw new Error("--limit needs a positive integer");
+      opts.limit = n;
+      continue;
+    }
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  return opts;
+}
+
+function parseExportCloudArgs(argv: string[]): ExportCloudOptions {
+  const opts: ExportCloudOptions = {
+    outDir: resolve(process.cwd(), "tmp", "cloud-agents"),
+    limit: null,
+  };
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--") continue;
+    if (arg === "--help" || arg === "-h") {
+      printHelp();
+      process.exit(0);
+    }
+    if (arg === "--out") {
+      opts.outDir = resolve(argv[++i] ?? "");
+      if (!opts.outDir) throw new Error("--out needs a directory");
       continue;
     }
     if (arg === "--limit") {
@@ -143,9 +186,7 @@ function installSigint(state: RunState): void {
     if (count === 1) {
       state.stopAfterCurrent = true;
       console.log("");
-      console.log(
-        "Finishing import of the current session. Press Ctrl+C again to terminate immediately.",
-      );
+      console.log("Finishing the current item. Press Ctrl+C again to terminate immediately.");
       return;
     }
     state.hardStop = true;
@@ -159,9 +200,62 @@ function isAbortError(err: unknown): boolean {
   return name === "AbortError";
 }
 
-async function main(): Promise<void> {
-  loadDotEnv();
-  const opts = parseArgs(process.argv.slice(2));
+async function runExportCloud(argv: string[]): Promise<void> {
+  const opts = parseExportCloudArgs(argv);
+  const apiKey = requireEnv("CURSOR_API_KEY");
+
+  const state: RunState = {
+    stopAfterCurrent: false,
+    hardStop: false,
+    currentSessionId: null,
+    abortController: new AbortController(),
+  };
+  installSigint(state);
+
+  console.log(`Mode: export-cloud`);
+  console.log(`Output: ${opts.outDir}`);
+  if (opts.limit !== null) console.log(`Limit: ${opts.limit}`);
+
+  try {
+    const abortController = state.abortController;
+    if (!abortController) throw new Error("missing abort controller");
+
+    const summary = await exportCloudAgents(
+      { apiKey },
+      {
+        outDir: opts.outDir,
+        limit: opts.limit,
+        signal: abortController.signal,
+        shouldStop: () => state.stopAfterCurrent || state.hardStop,
+        onProgress: (line) => console.log(line),
+      },
+    );
+
+    console.log("");
+    console.log("Summary");
+    console.log(`  listed: ${summary.listed}`);
+    console.log(`  written: ${summary.written}`);
+    console.log(`  skipped (deleted): ${summary.skippedDeleted}`);
+    console.log(`  skipped (empty): ${summary.skippedEmpty}`);
+    console.log(`  failed: ${summary.failed}`);
+    console.log(`  out: ${summary.outDir}`);
+    if (state.hardStop || state.stopAfterCurrent) {
+      console.log(`  status: stopped early`);
+      process.exit(130);
+    }
+  } catch (err) {
+    if (state.hardStop || isAbortError(err)) {
+      console.log("");
+      console.log("Summary");
+      console.log("  status: interrupted");
+      process.exit(130);
+    }
+    throw err;
+  }
+}
+
+async function runImportLocal(argv: string[]): Promise<void> {
+  const opts = parseImportArgs(argv);
   const cutoff = beforeCutoffMs(opts.before);
 
   const client: AgentmemoryClient = {
@@ -357,6 +451,24 @@ async function main(): Promise<void> {
   }
 
   if (exitCode !== 0) process.exit(exitCode);
+}
+
+async function main(): Promise<void> {
+  loadDotEnv();
+  const argv = process.argv.slice(2);
+  const command = argv[0];
+
+  if (command === "export-cloud") {
+    await runExportCloud(argv.slice(1));
+    return;
+  }
+
+  if (command === "help" || command === "--help" || command === "-h") {
+    printHelp();
+    return;
+  }
+
+  await runImportLocal(argv);
 }
 
 main().catch((err) => {

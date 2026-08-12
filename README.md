@@ -2,7 +2,9 @@
 
 Small local CLI. Reads Cursor agent transcript JSONL from disk and posts user prompts plus assistant replies into a remote agentmemory over `POST /agentmemory/observe/bulk`.
 
-One HTTP request per session (chunked at 500 events if needed). Cloud transcripts are out of scope.
+One HTTP request per session (chunked at 500 events if needed).
+
+Also exports Cursor Cloud agent conversations via the Cloud Agents HTTP API into `tmp/cloud-agents/<id>.json` (Phase 1). Importing those files into agentmemory is not wired yet.
 
 Needs agentmemory with the bulk observe endpoint (fork PR #19).
 
@@ -15,9 +17,10 @@ corepack enable
 pnpm install
 cp .env.example .env
 # fill AGENTMEMORY_URL and AGENTMEMORY_SECRET
+# for export-cloud, also fill CURSOR_API_KEY
 ```
 
-## What it imports
+## What it imports (local)
 
 Walks `~/.cursor/projects/*/agent-transcripts/<uuid>/<uuid>.jsonl` (parent chats only). Skips `subagents/`.
 
@@ -29,7 +32,7 @@ For each line:
 
 Skips a file when that `sessionId` already exists on the server.
 
-## Timestamps
+## Timestamps (local)
 
 Each file starts a clock at birthtime, or mtime if birthtime is missing.
 
@@ -39,6 +42,8 @@ Each file starts a clock at birthtime, or mtime if birthtime is missing.
 So older chats stay in the past instead of collapsing to "today".
 
 ## Usage
+
+### Local import
 
 Dry-run (default, no writes):
 
@@ -65,13 +70,39 @@ Actually write (review the dry-run first). Run the built file directly, not thro
 pnpm build && node dist/cli.js --apply
 ```
 
+### Cloud export (Phase 1)
+
+Lists all cloud agents (`GET /v1/agents`, for `createdAt` + `updatedAt`), fetches each conversation (`GET /v0/agents/{id}/conversation`), and writes one JSON envelope per readable session:
+
+```bash
+pnpm build && node dist/cli.js export-cloud
+```
+
+Default output: `tmp/cloud-agents/<id>.json`. Override with `--out DIR`. Optional `--limit N` after the list is sorted oldest-first.
+
+Skips deleted agents and empty conversations. Envelope shape:
+
+```json
+{
+  "id": "bc-…",
+  "createdAt": "…",
+  "updatedAt": "…",
+  "name": "…",
+  "status": "…",
+  "source": { "repos": [{ "url": "…" }] },
+  "messages": [{ "id": "msg_…", "type": "user_message", "text": "…" }]
+}
+```
+
+Needs `CURSOR_API_KEY` in `.env`. Does not call agentmemory.
+
 ## Safety
 
-- Dry-run unless you pass `--apply`.
+- Local import is dry-run unless you pass `--apply`.
 - Session-exists skip uses `GET /agentmemory/replay/sessions`. Progress lines print
   `[ 12%] skipped(exists)|skipped(before)|import|dry-run ...` as each file is handled.
-- Ctrl+C once finishes the current session, then stops. Ctrl+C again aborts immediately
-  and prints the partial session id (forget that session if you need a clean re-import).
+- Ctrl+C once finishes the current session/agent, then stops. Ctrl+C again aborts immediately
+  and prints the partial session id when importing (forget that session if you need a clean re-import).
   The summary always prints, including files remaining. This needs `node dist/cli.js`:
   under `pnpm` one Ctrl+C arrives as two SIGINTs and aborts on the spot.
 - Stable per-message `eventId`s so retries dedupe on the server. One id per imported
