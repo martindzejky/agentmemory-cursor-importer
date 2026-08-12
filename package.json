@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Import local Cursor agent transcripts into agentmemory via /observe",
+  "description": "Import local and Cursor Cloud agent transcripts into agentmemory via /observe/bulk",
   "bin": {
     "agentmemory-cursor-importer": "./dist/cli.js"
   },

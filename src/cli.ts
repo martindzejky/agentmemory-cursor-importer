@@ -30,39 +30,33 @@ type RunState = {
 };
 
 function printHelp(): void {
-  console.log(`Import local or exported cloud Cursor transcripts into agentmemory,
-or export cloud agent conversations to disk.
+  console.log(`Import Cursor transcripts into agentmemory (local JSONL or exported
+cloud agents), or download cloud conversations to disk.
 
 Usage:
   node dist/cli.js [--apply] [--path DIR] [--before ISO] [--limit N]
   node dist/cli.js export-cloud [--out DIR] [--limit N]
   node dist/cli.js import-cloud [--apply] [--path DIR] [--before ISO] [--limit N]
 
-Local import defaults to dry-run (no writes). Pass --apply to POST
-/agentmemory/observe/bulk (one request per session, chunked at ${OBSERVE_BULK_MAX}).
+Imports default to dry-run. Pass --apply to POST /agentmemory/observe/bulk
+(one request per session, chunked at ${OBSERVE_BULK_MAX}).
 
-export-cloud lists agents via GET /v1/agents and writes readable conversations
-from GET /v0/agents/{id}/conversation to tmp/cloud-agents/<id>.json
-(skips deleted/empty). Does not touch agentmemory.
+export-cloud: GET /v1/agents + GET /v0/agents/{id}/conversation →
+  tmp/cloud-agents/<id>.json (skips deleted/empty). Needs CURSOR_API_KEY.
 
-import-cloud reads those JSON envelopes (default tmp/cloud-agents) and posts
-user/assistant messages the same way as local import. Timestamps are spread
-evenly between createdAt and updatedAt. eventIds: cursor-cloud:{id}:{msgId}.
-Skips sessionIds already on the server.
+import-cloud: reads those envelopes (default tmp/cloud-agents) and posts
+  user/assistant text like local import. Timestamps spread createdAt→updatedAt.
+  eventIds: cursor-cloud:{id}:{msgId}. Skips sessionIds already on the server.
 
 Ctrl+C once: finish the current session/agent, then stop.
 Ctrl+C twice: abort immediately (may leave a partial session).
 
 Env:
-  AGENTMEMORY_URL / AGENTMEMORY_SECRET  (local import, import-cloud)
+  AGENTMEMORY_URL / AGENTMEMORY_SECRET  (imports)
   CURSOR_API_KEY                        (export-cloud)
 
-Local timestamps:
-  Start from file birthtime (else mtime).
-  A user <timestamp> tag sets the clock.
-  Anything without a tag advances +1ms.
-
-Before import-cloud --apply: turn OFF AGENTMEMORY_AUTO_COMPRESS on Railway.
+Local timestamps: file birthtime/mtime; user <timestamp> sets clock; else +1ms.
+Large imports: turn OFF AGENTMEMORY_AUTO_COMPRESS on Railway first, then re-enable.
 `);
 }
 

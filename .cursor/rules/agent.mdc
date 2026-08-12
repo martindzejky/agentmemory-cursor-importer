@@ -17,4 +17,6 @@ Prefer existing patterns.
 Do not add unrequested features or APIs.
 Store temporary artifacts in `tmp/`, not the repo root.
 
-This is a local CLI. Do not call a hosted agentmemory with `--apply` unless the user explicitly asks.
+This is a local CLI (local JSONL import, cloud export to `tmp/cloud-agents/`,
+cloud import from those files). Do not call a hosted agentmemory with `--apply`
+unless the user explicitly asks.
