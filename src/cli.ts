@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { listSessionIds, postObserve, type AgentmemoryClient } from "./client.js";
+import {
+  chunkObservations,
+  listSessionIds,
+  OBSERVE_BULK_MAX,
+  postObserveBulk,
+  type AgentmemoryClient,
+} from "./client.js";
 import { loadDotEnv, requireEnv } from "./env.js";
-import { parseTranscriptFile } from "./parse.js";
+import { parseTranscriptFile, type ImportEvent } from "./parse.js";
 import { decodeProjectSlug } from "./project.js";
 import { findParentTranscripts } from "./walk.js";
 
@@ -20,7 +26,8 @@ function printHelp(): void {
 Usage:
   pnpm start [--apply] [--path DIR] [--before ISO] [--limit N]
 
-Defaults to dry-run (no writes). Pass --apply to POST /agentmemory/observe.
+Defaults to dry-run (no writes). Pass --apply to POST /agentmemory/observe/bulk
+(one request per session, chunked at ${OBSERVE_BULK_MAX} events).
 
 Env:
   AGENTMEMORY_URL
@@ -82,6 +89,37 @@ function beforeCutoffMs(before: string | null): number | null {
   return ms;
 }
 
+function toObservations(
+  events: ImportEvent[],
+  sessionId: string,
+  project: string,
+  cwd: string,
+): Record<string, unknown>[] {
+  return events.map((event) =>
+    event.hookType === "prompt_submit"
+      ? {
+          hookType: "prompt_submit",
+          sessionId,
+          project,
+          cwd,
+          agentId: "cursor",
+          timestamp: event.timestamp,
+          eventId: event.eventId,
+          data: { prompt: event.text },
+        }
+      : {
+          hookType: "assistant_response",
+          sessionId,
+          project,
+          cwd,
+          agentId: "cursor",
+          timestamp: event.timestamp,
+          eventId: event.eventId,
+          data: { assistantResponse: event.text },
+        },
+  );
+}
+
 async function main(): Promise<void> {
   loadDotEnv();
   const opts = parseArgs(process.argv.slice(2));
@@ -136,44 +174,29 @@ async function main(): Promise<void> {
     plannedEvents += events.length;
     importedSessions += 1;
 
+    const chunks = chunkObservations(events, OBSERVE_BULK_MAX);
     console.log(
-      `${opts.apply ? "import" : "dry-run"} ${file.sessionId} project=${project} events=${events.length} first=${events[0].timestamp}`,
+      `${opts.apply ? "import" : "dry-run"} ${file.sessionId} project=${project} events=${events.length} chunks=${chunks.length} first=${events[0].timestamp}`,
     );
 
     if (!opts.apply) continue;
 
-    for (const event of events) {
-      const payload =
-        event.hookType === "prompt_submit"
-          ? {
-              hookType: "prompt_submit",
-              sessionId: file.sessionId,
-              project,
-              cwd,
-              agentId: "cursor",
-              timestamp: event.timestamp,
-              eventId: event.eventId,
-              data: { prompt: event.text },
-            }
-          : {
-              hookType: "assistant_response",
-              sessionId: file.sessionId,
-              project,
-              cwd,
-              agentId: "cursor",
-              timestamp: event.timestamp,
-              eventId: event.eventId,
-              data: { assistantResponse: event.text },
-            };
-
-      const result = await postObserve(client, payload);
+    const observations = toObservations(events, file.sessionId, project, cwd);
+    for (const chunk of chunkObservations(observations, OBSERVE_BULK_MAX)) {
+      const result = await postObserveBulk(client, chunk);
       if (!result.ok) {
-        failed += 1;
-        console.error(`  fail ${event.eventId}: ${result.error}`);
+        failed += chunk.length;
+        console.error(`  bulk fail (${chunk.length} events): ${result.error}`);
         continue;
       }
-      if (result.deduplicated) deduped += 1;
-      else posted += 1;
+      posted += result.imported;
+      deduped += result.deduplicated;
+      failed += result.failed;
+      for (const err of result.errors) {
+        const where =
+          err.eventId ?? (typeof err.index === "number" ? `index ${err.index}` : "item");
+        console.error(`  fail ${where}: ${err.error}`);
+      }
     }
   }
 

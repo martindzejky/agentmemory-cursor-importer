@@ -1,8 +1,10 @@
 # agentmemory-cursor-importer
 
-Small local CLI. Reads Cursor agent transcript JSONL from disk and posts user prompts plus assistant replies into a remote agentmemory over `POST /agentmemory/observe`.
+Small local CLI. Reads Cursor agent transcript JSONL from disk and posts user prompts plus assistant replies into a remote agentmemory over `POST /agentmemory/observe/bulk`.
 
-No new server endpoint. Cloud transcripts are out of scope.
+One HTTP request per session (chunked at 500 events if needed). Cloud transcripts are out of scope.
+
+Needs agentmemory with the bulk observe endpoint (fork PR #19).
 
 ## Setup
 
@@ -65,7 +67,8 @@ pnpm start --apply
 ## Safety
 
 - Dry-run unless you pass `--apply`.
-- Session-exists skip uses `GET /agentmemory/replay/sessions`.
+- Session-exists skip uses `GET /agentmemory/replay/sessions`. Progress lines print
+  `skipped(exists)` / `skipped(before)` / `import` as each file is handled.
 - Stable per-message `eventId`s so retries dedupe on the server. One id per imported
   prompt or assistant reply in that session, in file order. Examples for session
   `abc-123`:
